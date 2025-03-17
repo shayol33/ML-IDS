@@ -1,0 +1,54 @@
+# ids_api.py
+from flask import Flask, request, jsonify
+import joblib
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+import pandas as pd
+
+app = Flask(__name__)
+# Load your model (and scaler if saved separately)
+model = joblib.load('trained_ids_model.joblib')
+# Attempt to load a pre-fitted scaler, otherwise create a new one
+try:
+    scaler = joblib.load('scaler.joblib')
+except Exception as e:
+    scaler = StandardScaler()
+
+def preprocess(data_dict):
+    # Convert dictionary to DataFrame
+    df = pd.DataFrame([data_dict])
+    # Strip whitespace from column names
+    df.columns = df.columns.str.strip()
+    # Replace infinities with NaN
+    df = df.replace([np.inf, -np.inf], np.nan)
+    
+    # Select only numeric columns
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    df_numeric = df[numeric_cols].copy()
+    
+    if df_numeric.empty:
+        # If no numeric data is found, raise an error with a clear message
+        raise ValueError("No numeric data found in input. Ensure that the input JSON contains the required numeric features.")
+    
+    # Fill NaN values in numeric columns with their column means
+    df_numeric = df_numeric.fillna(df_numeric.mean())
+    
+    # If the scaler is not fitted, fit it on the numeric data (for demo purposes only)
+    if not hasattr(scaler, "mean_"):
+        scaler.fit(df_numeric)
+    # Transform the numeric data
+    return scaler.transform(df_numeric)
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    try:
+        # Expecting JSON payload
+        data = request.get_json()
+        processed = preprocess(data)
+        prediction = model.predict(processed)
+        return jsonify({'prediction': prediction.tolist()})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
